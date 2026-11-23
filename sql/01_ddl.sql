@@ -26,6 +26,10 @@ CREATE FILE FORMAT IF NOT EXISTS SKYPOINTS.RAW.FF_REDEMPTION_JSON
   STRIP_OUTER_ARRAY = TRUE;
 
 -- Replace with an external stage + storage integration for production.
+-- The supplied IND.csv, USA.csv, and AUS.csv files are read from this stage's root.
+-- A LIST result like FEED_STAGE/IND.csv includes the stage name as its display prefix;
+-- it does not mean there is a FEED_STAGE/ subfolder inside the stage.
+-- The optional global pipe feed and redemption JSON feed use GLOBAL/ and REDEMPTIONS/.
 CREATE STAGE IF NOT EXISTS SKYPOINTS.RAW.FEED_STAGE
   FILE_FORMAT = SKYPOINTS.RAW.FF_MEMBER_CSV;
 
@@ -50,8 +54,8 @@ CREATE TABLE IF NOT EXISTS SKYPOINTS.RAW.REDEMPTION_LANDING (
   RECORD_HASH           STRING
 );
 
--- Durable crosswalk from source-local IDs to a global member key.
--- Populate it from an authoritative identity source; do not infer matches from names.
+-- Durable crosswalk from source-local IDs to the canonical member key.
+-- Populate it from an authoritative identity source; do not infer identity from IDs alone.
 CREATE TABLE IF NOT EXISTS SKYPOINTS.CORE.MEMBER_ID_XREF (
   SOURCE_SYSTEM         STRING NOT NULL,
   SOURCE_COUNTRY_CODE   STRING,
@@ -123,7 +127,8 @@ CREATE TABLE IF NOT EXISTS SKYPOINTS.STG.MEMBER_DQ_QUARANTINE (
   QUARANTINED_AT        TIMESTAMP_NTZ NOT NULL DEFAULT CURRENT_TIMESTAMP()::TIMESTAMP_NTZ
 );
 
--- One global current row per durable member key. Country tables mirror this shape.
+-- One current row per normalized assessment Member Name key, unless an authoritative
+-- crosswalk supplies the canonical key. Country tables mirror this profile shape.
 CREATE TABLE IF NOT EXISTS SKYPOINTS.CORE.MEMBER_PROFILE_CURRENT (
   MEMBER_KEY            STRING NOT NULL,
   MEMBER_ID             STRING NOT NULL,

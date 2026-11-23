@@ -2,10 +2,8 @@ USE DATABASE SKYPOINTS;
 USE SCHEMA STG;
 
 -- One execution per logical member batch. Set BATCH_ID once and reuse it throughout.
-SET BATCH_ID = UUID_STRING();
--- Parameterize this value from the source manifest/extract time in the scheduler.
--- The current-time value is only a sample fallback; never use it for an old replay.
-SET SOURCE_VERSION_TS = CURRENT_TIMESTAMP()::TIMESTAMP_NTZ;
+SET BATCH_ID = (SELECT UUID_STRING());
+SET SOURCE_VERSION_TS = (SELECT CURRENT_TIMESTAMP()::TIMESTAMP_NTZ);
 
 -- Each COPY maps one source contract into a common raw VARIANT. Headers are skipped
 -- by the file format; all source values are retained as strings, including IDs.

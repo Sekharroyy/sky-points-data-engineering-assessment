@@ -1,20 +1,26 @@
--- Redemption feed is JSON Lines (one member object per line) or one JSON object
--- per file. STRIP_OUTER_ARRAY also allows a top-level array of member objects.
+-- Input: JSON Lines (one member object per line), one JSON object per file, or a
+-- top-level array of member objects. Upload files under FEED_STAGE/REDEMPTIONS/.
+-- No redemption JSON file was included with the local sample CSVs, so this pipeline
+-- is provided but has not been demonstrated end-to-end with redemption rows.
 USE DATABASE SKYPOINTS;
 USE SCHEMA STG;
 
-SET BATCH_ID = UUID_STRING();
+SET BATCH_ID = (SELECT UUID_STRING());
 
 COPY INTO SKYPOINTS.RAW.REDEMPTION_LANDING
-  (INGEST_BATCH_ID, SOURCE_FILE, SOURCE_ROW_NUMBER, INGESTED_AT, RAW_RECORD, RECORD_HASH)
+  (INGEST_BATCH_ID, SOURCE_FILE, SOURCE_ROW_NUMBER, RAW_RECORD)
 FROM (
   SELECT $BATCH_ID::STRING, METADATA$FILENAME, METADATA$FILE_ROW_NUMBER,
-         CURRENT_TIMESTAMP()::TIMESTAMP_NTZ, $1,
-         SHA2(TO_JSON($1), 256)
+         $1
   FROM @SKYPOINTS.RAW.FEED_STAGE/REDEMPTIONS/
 )
 FILE_FORMAT = (FORMAT_NAME = SKYPOINTS.RAW.FF_REDEMPTION_JSON)
 ON_ERROR = 'ABORT_STATEMENT';
+
+-- Hashing is kept outside the restricted COPY transformation SELECT list.
+UPDATE SKYPOINTS.RAW.REDEMPTION_LANDING
+SET RECORD_HASH = SHA2(TO_JSON(RAW_RECORD), 256)
+WHERE INGEST_BATCH_ID = $BATCH_ID::STRING;
 
 CREATE OR REPLACE TEMPORARY TABLE BATCH_REDEMPTION_ROWS AS
 WITH flattened AS (
@@ -46,6 +52,8 @@ WITH flattened AS (
            IFF(mx.GLOBAL_MEMBER_ID IS NULL, 'UNRESOLVED_GLOBAL_MEMBER_ID', NULL)
          ) AS DQ_ERRORS
   FROM flattened f
+  -- Partner IDs must be mapped to the same canonical MEMBER_KEY used by member feeds.
+  -- Populate this crosswalk from an authoritative partner identity mapping first.
   LEFT JOIN SKYPOINTS.CORE.MEMBER_ID_XREF mx
     ON mx.SOURCE_SYSTEM = 'PARTNER'
    AND mx.SOURCE_MEMBER_ID = f.PARTNER_MEMBER_ID

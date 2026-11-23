@@ -3,29 +3,29 @@ USE SCHEMA STG;
 
 -- One execution per logical member batch. Set BATCH_ID once and reuse it throughout.
 SET BATCH_ID = (SELECT UUID_STRING());
+-- Parameterize this value from the source manifest/extract time in the scheduler.
+-- The current-time value is only a sample fallback; never use it for an old replay.
 SET SOURCE_VERSION_TS = (SELECT CURRENT_TIMESTAMP()::TIMESTAMP_NTZ);
 
+-- The three supplied country CSVs are at the root of FEED_STAGE. FILES selects one
+-- file per projection so each layout is mapped with its own column names. Snowflake's
+-- LIST output prefixes names with the stage name; do not add FEED_STAGE as a path.
 -- Each COPY maps one source contract into a common raw VARIANT. Headers are skipped
 -- by the file format; all source values are retained as strings, including IDs.
 COPY INTO SKYPOINTS.RAW.MEMBER_LANDING
   (INGEST_BATCH_ID, SOURCE_COUNTRY_CODE, SOURCE_LAYOUT, SOURCE_FILE, SOURCE_ROW_NUMBER,
-   SOURCE_VERSION_TS, INGESTED_AT, RAW_RECORD, RECORD_HASH)
+   SOURCE_VERSION_TS, RAW_RECORD)
 FROM (
   SELECT $BATCH_ID::STRING, 'IND', 'IND_CSV', METADATA$FILENAME, METADATA$FILE_ROW_NUMBER,
          $SOURCE_VERSION_TS::TIMESTAMP_NTZ,
-         CURRENT_TIMESTAMP()::TIMESTAMP_NTZ,
-         OBJECT_CONSTRUCT_KEEP_NULL(
+         OBJECT_CONSTRUCT(
            'ID', $1::STRING, 'Name', $2::STRING, 'DOB', $3::STRING,
            'TierCode', $4::STRING, 'EnrollmentDate', $5::STRING,
            'Individual or Corporate', $6::STRING, 'Flight Date', $7::STRING
-         ),
-         SHA2(TO_JSON(OBJECT_CONSTRUCT_KEEP_NULL(
-           'ID', $1::STRING, 'Name', $2::STRING, 'DOB', $3::STRING,
-           'TierCode', $4::STRING, 'EnrollmentDate', $5::STRING,
-           'Individual or Corporate', $6::STRING, 'Flight Date', $7::STRING
-         )), 256)
-  FROM @SKYPOINTS.RAW.FEED_STAGE/IND/
+         )
+  FROM @SKYPOINTS.RAW.FEED_STAGE
 )
+FILES = ('IND.csv')
 FILE_FORMAT = (FORMAT_NAME = SKYPOINTS.RAW.FF_MEMBER_CSV)
 ON_ERROR = 'ABORT_STATEMENT';
 
@@ -34,36 +34,28 @@ ON_ERROR = 'ABORT_STATEMENT';
 -- $2 is the record type, and the ten shown sample fields occupy $3 through $12.
 COPY INTO SKYPOINTS.RAW.MEMBER_LANDING
   (INGEST_BATCH_ID, SOURCE_COUNTRY_CODE, SOURCE_LAYOUT, SOURCE_FILE, SOURCE_ROW_NUMBER,
-   SOURCE_VERSION_TS, INGESTED_AT, RAW_RECORD, RECORD_HASH)
+   SOURCE_VERSION_TS, RAW_RECORD)
 FROM (
   SELECT $BATCH_ID::STRING,
-         CASE UPPER(TRIM($10::STRING))
+         CASE TRIM($10::STRING)
            WHEN 'INDIA' THEN 'IND' WHEN 'IND' THEN 'IND'
            WHEN 'US' THEN 'USA' WHEN 'UNITED STATES' THEN 'USA' WHEN 'USA' THEN 'USA'
            WHEN 'AU' THEN 'AUS' WHEN 'AUSTRALIA' THEN 'AUS' WHEN 'AUS' THEN 'AUS'
            WHEN 'PHIL' THEN 'PHL' WHEN 'PHILIPPINES' THEN 'PHL'
            WHEN 'CANADA' THEN 'CAN' WHEN 'CAN' THEN 'CAN'
-           ELSE COALESCE(UPPER(TRIM($10::STRING)), 'UNK')
+           ELSE IFF(TRIM($10::STRING) IS NULL, 'UNK', TRIM($10::STRING))
          END,
          'GLOBAL_PIPE',
          METADATA$FILENAME, METADATA$FILE_ROW_NUMBER,
-         $SOURCE_VERSION_TS::TIMESTAMP_NTZ, CURRENT_TIMESTAMP()::TIMESTAMP_NTZ,
-         OBJECT_CONSTRUCT_KEEP_NULL(
+         $SOURCE_VERSION_TS::TIMESTAMP_NTZ,
+         OBJECT_CONSTRUCT(
            'Record_Type', $2::STRING,
            'Member_Name', $3::STRING, 'Member_Id', $4::STRING,
            'Enrollment_Date', $5::STRING, 'Last_Flight_Date', $6::STRING,
            'Tier_Code', $7::STRING, 'Agent_Name', $8::STRING,
            'State', $9::STRING, 'Country', $10::STRING,
            'DOB', $11::STRING, 'Is_Active', $12::STRING
-         ),
-         SHA2(TO_JSON(OBJECT_CONSTRUCT_KEEP_NULL(
-           'Record_Type', $2::STRING,
-           'Member_Name', $3::STRING, 'Member_Id', $4::STRING,
-           'Enrollment_Date', $5::STRING, 'Last_Flight_Date', $6::STRING,
-           'Tier_Code', $7::STRING, 'Agent_Name', $8::STRING,
-           'State', $9::STRING, 'Country', $10::STRING,
-           'DOB', $11::STRING, 'Is_Active', $12::STRING
-         )), 256)
+         )
   FROM @SKYPOINTS.RAW.FEED_STAGE/GLOBAL/
 )
 FILE_FORMAT = (FORMAT_NAME = SKYPOINTS.RAW.FF_MEMBER_PIPE)
@@ -71,45 +63,41 @@ ON_ERROR = 'ABORT_STATEMENT';
 
 COPY INTO SKYPOINTS.RAW.MEMBER_LANDING
   (INGEST_BATCH_ID, SOURCE_COUNTRY_CODE, SOURCE_LAYOUT, SOURCE_FILE, SOURCE_ROW_NUMBER,
-   SOURCE_VERSION_TS, INGESTED_AT, RAW_RECORD, RECORD_HASH)
+   SOURCE_VERSION_TS, RAW_RECORD)
 FROM (
   SELECT $BATCH_ID::STRING, 'USA', 'USA_CSV', METADATA$FILENAME, METADATA$FILE_ROW_NUMBER,
          $SOURCE_VERSION_TS::TIMESTAMP_NTZ,
-         CURRENT_TIMESTAMP()::TIMESTAMP_NTZ,
-         OBJECT_CONSTRUCT_KEEP_NULL(
+         OBJECT_CONSTRUCT(
            'ID', $1::STRING, 'Name', $2::STRING, 'TierCode', $3::STRING,
            'EnrollmentDate', $4::STRING, 'FlightDate', $5::STRING
-         ),
-         SHA2(TO_JSON(OBJECT_CONSTRUCT_KEEP_NULL(
-           'ID', $1::STRING, 'Name', $2::STRING, 'TierCode', $3::STRING,
-           'EnrollmentDate', $4::STRING, 'FlightDate', $5::STRING
-         )), 256)
-  FROM @SKYPOINTS.RAW.FEED_STAGE/USA/
+         )
+  FROM @SKYPOINTS.RAW.FEED_STAGE
 )
+FILES = ('USA.csv')
 FILE_FORMAT = (FORMAT_NAME = SKYPOINTS.RAW.FF_MEMBER_CSV)
 ON_ERROR = 'ABORT_STATEMENT';
 
 COPY INTO SKYPOINTS.RAW.MEMBER_LANDING
   (INGEST_BATCH_ID, SOURCE_COUNTRY_CODE, SOURCE_LAYOUT, SOURCE_FILE, SOURCE_ROW_NUMBER,
-   SOURCE_VERSION_TS, INGESTED_AT, RAW_RECORD, RECORD_HASH)
+   SOURCE_VERSION_TS, RAW_RECORD)
 FROM (
   SELECT $BATCH_ID::STRING, 'AUS', 'AUS_CSV', METADATA$FILENAME, METADATA$FILE_ROW_NUMBER,
          $SOURCE_VERSION_TS::TIMESTAMP_NTZ,
-         CURRENT_TIMESTAMP()::TIMESTAMP_NTZ,
-         OBJECT_CONSTRUCT_KEEP_NULL(
+         OBJECT_CONSTRUCT(
            'Unique ID', $1::STRING, 'Member Name', $2::STRING,
            'Tier Type', $3::STRING, 'Date of Birth', $4::STRING,
            'Date of Enrollment', $5::STRING, 'Date of Flight', $6::STRING
-         ),
-         SHA2(TO_JSON(OBJECT_CONSTRUCT_KEEP_NULL(
-           'Unique ID', $1::STRING, 'Member Name', $2::STRING,
-           'Tier Type', $3::STRING, 'Date of Birth', $4::STRING,
-           'Date of Enrollment', $5::STRING, 'Date of Flight', $6::STRING
-         )), 256)
-  FROM @SKYPOINTS.RAW.FEED_STAGE/AUS/
+         )
+  FROM @SKYPOINTS.RAW.FEED_STAGE
 )
+FILES = ('AUS.csv')
 FILE_FORMAT = (FORMAT_NAME = SKYPOINTS.RAW.FF_MEMBER_CSV)
 ON_ERROR = 'ABORT_STATEMENT';
+
+-- Hashing and load-time expressions are deliberately outside COPY transformations.
+UPDATE SKYPOINTS.RAW.MEMBER_LANDING
+SET RECORD_HASH = SHA2(TO_JSON(RAW_RECORD), 256)
+WHERE INGEST_BATCH_ID = $BATCH_ID::STRING;
 
 -- Convert each source schema to canonical columns. TRY_TO_DATE preserves invalid
 -- values as NULL so they can be quarantined with an explicit reason.
@@ -264,9 +252,12 @@ WITH extracted AS (
     END AS LAST_FLIGHT_DATE
   FROM cleaned c
 ), keyed AS (
+  -- Member Name is the declared key in the assessment. Normalize case and spaces
+  -- for a deterministic fallback; an authoritative crosswalk can supply the same
+  -- canonical key when identity is known across source systems.
   SELECT p.*,
     COALESCE(x.GLOBAL_MEMBER_ID,
-      'SRC:' || p.SOURCE_COUNTRY_CODE || ':' || p.MEMBER_ID) AS MEMBER_KEY,
+      'NAME:' || UPPER(TRIM(p.MEMBER_NAME))) AS MEMBER_KEY,
     CASE
       WHEN ACTIVE_TEXT IN ('A', 'Y', '1') THEN TRUE
       WHEN ACTIVE_TEXT IN ('I', 'N', '0') THEN FALSE
@@ -279,6 +270,12 @@ WITH extracted AS (
    AND x.SOURCE_MEMBER_ID = p.MEMBER_ID
    AND (x.ACTIVE_FROM IS NULL OR x.ACTIVE_FROM <= CURRENT_DATE())
    AND (x.ACTIVE_TO IS NULL OR x.ACTIVE_TO >= CURRENT_DATE())
+), named AS (
+  SELECT k.*,
+         COUNT(*) OVER (
+           PARTITION BY k.SOURCE_FILE, UPPER(TRIM(k.MEMBER_NAME))
+         ) AS NAME_OCCURRENCE_COUNT
+  FROM keyed k
 ), checked AS (
   SELECT k.*,
     ARRAY_CONSTRUCT_COMPACT(
@@ -286,6 +283,8 @@ WITH extracted AS (
       IFF(MEMBER_ID IS NOT NULL AND LENGTH(MEMBER_ID) > 18, 'MEMBER_ID_TOO_LONG', NULL),
       IFF(MEMBER_NAME IS NULL, 'MISSING_MEMBER_NAME', NULL),
       IFF(MEMBER_NAME IS NOT NULL AND LENGTH(MEMBER_NAME) > 255, 'MEMBER_NAME_TOO_LONG', NULL),
+      IFF(MEMBER_NAME IS NOT NULL AND NAME_OCCURRENCE_COUNT > 1,
+          'DUPLICATE_MEMBER_NAME_IN_SOURCE_FILE', NULL),
       IFF(ENROLLMENT_TEXT IS NULL OR ENROLLMENT_DATE IS NULL, 'INVALID_OR_MISSING_ENROLLMENT_DATE', NULL),
       IFF(ENROLLMENT_DATE > CURRENT_DATE(), 'ENROLLMENT_DATE_IN_FUTURE', NULL),
       IFF(DOB_TEXT IS NOT NULL AND DATE_OF_BIRTH IS NULL, 'INVALID_DATE_OF_BIRTH', NULL),
@@ -307,7 +306,7 @@ WITH extracted AS (
           'UNEXPECTED_RECORD_TYPE', NULL),
       IFF(NOT COALESCE(cfg.IS_ENABLED, FALSE), 'COUNTRY_TARGET_NOT_CONFIGURED', NULL)
     ) AS DQ_ERRORS
-  FROM keyed k
+  FROM named k
   LEFT JOIN SKYPOINTS.CORE.COUNTRY_TARGET_CONFIG cfg
     ON cfg.COUNTRY_CODE = k.COUNTRY_CODE AND cfg.IS_ENABLED
 )
